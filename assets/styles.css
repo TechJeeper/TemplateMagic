@@ -20,3 +20,36 @@
         .toggle-dot { top: 0.125rem; left: 0.125rem; width: 1rem; height: 1rem; background-color: white; border-radius: 50%; transition: all 0.3s; }
         .toggle-checkbox:checked ~ .toggle-dot { transform: translateX(100%); }
 
+        /* Improve mobile interactions (touch + drawer UX) */
+        #main-canvas { touch-action: none; }
+
+        /* Mobile tools drawer */
+        @media (max-width: 767px) {
+            #sidebar {
+                position: fixed;
+                top: 0;
+                left: 0;
+                bottom: 0;
+                width: 100%;
+                max-width: 440px;
+                transform: translateX(-100%);
+                transition: transform 200ms ease;
+                pointer-events: none;
+                z-index: 60;
+            }
+
+            body.tools-open #sidebar {
+                transform: translateX(0);
+                pointer-events: auto;
+            }
+
+            #mobile-tools-backdrop { pointer-events: none; }
+            body.tools-open #mobile-tools-backdrop { pointer-events: auto; }
+
+            /* Reduce excessive top padding/margin on small screens */
+            #canvas-wrapper { margin: 12px !important; }
+
+            /* Keep zoom controls from overlapping too much */
+            #zoom-controls { top: 8px; right: 8px; }
+        }
+

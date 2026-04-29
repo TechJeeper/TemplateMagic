@@ -845,9 +845,18 @@ self.onmessage = function(e) {
         els.btnZoomIn.addEventListener('click', () => { state.zoom = Math.min(5, state.zoom + 0.2); els.valZoom.innerText = Math.round(state.zoom * 100) + '%'; renderCanvas(); });
         els.btnZoomOut.addEventListener('click', () => { state.zoom = Math.max(0.1, state.zoom - 0.2); els.valZoom.innerText = Math.round(state.zoom * 100) + '%'; renderCanvas(); });
 
-        // Canvas Mouse Events
-        els.mainCanvas.addEventListener('mousedown', (e) => {
+        // Canvas Pointer Events (supports mouse + touch + pen)
+        let activePointerId = null;
+
+        els.mainCanvas.addEventListener('pointerdown', (e) => {
             if (!state.imageObj) return;
+            // Only process primary mouse button; touch/pen doesn't have "buttons" in the same way.
+            if (e.pointerType === 'mouse' && e.button !== 0) return;
+
+            e.preventDefault?.();
+            activePointerId = e.pointerId;
+            try { els.mainCanvas.setPointerCapture(e.pointerId); } catch (_) {}
+
             const coords = getCanvasCoords(e);
 
             if (state.toolMode === 'wand') {
@@ -911,8 +920,11 @@ self.onmessage = function(e) {
             updateUI();
         });
 
-        els.mainCanvas.addEventListener('mousemove', (e) => {
+        els.mainCanvas.addEventListener('pointermove', (e) => {
             if (!state.imageObj || state.toolMode === 'wand') return;
+            if (activePointerId !== null && e.pointerId !== activePointerId) return;
+
+            e.preventDefault?.();
             const coords = getCanvasCoords(e);
             state.mousePos = getSnappedCoords(coords.x, coords.y);
 
@@ -925,8 +937,22 @@ self.onmessage = function(e) {
             renderCanvas();
         });
 
-        els.mainCanvas.addEventListener('mouseup', () => state.isDragging = false);
-        els.mainCanvas.addEventListener('mouseleave', () => { state.mousePos = null; state.isDragging = false; renderCanvas(); });
+        const endPointer = (e) => {
+            if (activePointerId === null) return;
+            if (e && e.pointerId !== activePointerId) return;
+            activePointerId = null;
+            state.isDragging = false;
+        };
+
+        els.mainCanvas.addEventListener('pointerup', endPointer);
+        els.mainCanvas.addEventListener('pointercancel', endPointer);
+        els.mainCanvas.addEventListener('pointerleave', (e) => {
+            if (activePointerId !== null && e.pointerId !== activePointerId) return;
+            activePointerId = null;
+            state.mousePos = null;
+            state.isDragging = false;
+            renderCanvas();
+        });
 
         // Keybindings & Clear
         const doUndo = () => { if (state.points.length > 0) state.points.pop(); else if (state.paths.length > 0) state.paths.pop(); updateUI(); };
@@ -1081,4 +1107,41 @@ self.onmessage = function(e) {
                 setTimeout(() => URL.revokeObjectURL(url), 100);
             }, 'image/png');
         });
+
+        // --- Mobile UX: tools drawer ---
+        const mobileEls = {
+            btnOpenTools: document.getElementById('btn-open-tools'),
+            btnCloseTools: document.getElementById('btn-close-tools'),
+            mobileBackdrop: document.getElementById('mobile-tools-backdrop'),
+        };
+
+        const isMobileViewport = () => window.matchMedia('(max-width: 767px)').matches;
+
+        const openToolsDrawer = () => {
+            if (!isMobileViewport()) return;
+            document.body.classList.add('tools-open');
+            if (mobileEls.mobileBackdrop) mobileEls.mobileBackdrop.classList.remove('hidden');
+        };
+
+        const closeToolsDrawer = () => {
+            document.body.classList.remove('tools-open');
+            if (mobileEls.mobileBackdrop) mobileEls.mobileBackdrop.classList.add('hidden');
+        };
+
+        if (mobileEls.btnOpenTools) {
+            mobileEls.btnOpenTools.addEventListener('click', openToolsDrawer);
+        }
+        if (mobileEls.btnCloseTools) {
+            mobileEls.btnCloseTools.addEventListener('click', closeToolsDrawer);
+        }
+        if (mobileEls.mobileBackdrop) {
+            mobileEls.mobileBackdrop.addEventListener('click', closeToolsDrawer);
+        }
+
+        window.addEventListener('resize', () => {
+            if (!isMobileViewport()) closeToolsDrawer();
+        });
+
+        // Default to closed (important for reloads on mobile)
+        closeToolsDrawer();
 
