@@ -1,5 +1,6 @@
-// Initialize Icons
+        // Initialize Icons
         lucide.createIcons();
+        const HOWTO_STORAGE_KEY = 'templatemagic_hide_howto_dialog';
 
         // --- State Management ---
         const state = {
@@ -40,6 +41,10 @@
         // --- DOM Elements ---
         const els = {
             loadingOverlay: document.getElementById('loading-overlay'),
+            howtoOverlay: document.getElementById('howto-overlay'),
+            btnHowtoClose: document.getElementById('btn-howto-close'),
+            btnHowtoGotit: document.getElementById('btn-howto-gotit'),
+            inpHowtoNever: document.getElementById('inp-howto-never'),
             uploadImage: document.getElementById('upload-image'),
             btnExportSvg: document.getElementById('btn-export-svg'),
             btnExportPng: document.getElementById('btn-export-png'),
@@ -91,6 +96,22 @@
             canvasWrapper: document.getElementById('canvas-wrapper'),
             canvasPlaceholder: document.getElementById('canvas-placeholder'),
             mainCanvas: document.getElementById('main-canvas'),
+        };
+
+        const showHowtoIfNeeded = () => {
+            if (!els.howtoOverlay) return;
+            const hideHowto = localStorage.getItem(HOWTO_STORAGE_KEY) === '1';
+            if (!hideHowto) {
+                els.howtoOverlay.classList.remove('hidden');
+                els.howtoOverlay.classList.add('flex');
+                lucide.createIcons();
+            }
+        };
+
+        const hideHowtoDialog = () => {
+            if (!els.howtoOverlay) return;
+            els.howtoOverlay.classList.add('hidden');
+            els.howtoOverlay.classList.remove('flex');
         };
 
         const ctx = els.mainCanvas.getContext('2d', { willReadFrequently: true });
@@ -917,6 +938,21 @@ self.onmessage = function(e) {
             if (e.key === 'Backspace' || (e.key === 'z' && (e.ctrlKey || e.metaKey))) { e.preventDefault(); doUndo(); }
             if (e.key === 'Escape') { state.points = []; updateUI(); }
         });
+
+        if (els.btnHowtoClose) els.btnHowtoClose.addEventListener('click', hideHowtoDialog);
+        if (els.btnHowtoGotit) els.btnHowtoGotit.addEventListener('click', hideHowtoDialog);
+        if (els.inpHowtoNever) {
+            els.inpHowtoNever.checked = localStorage.getItem(HOWTO_STORAGE_KEY) === '1';
+            els.inpHowtoNever.addEventListener('change', (e) => {
+                localStorage.setItem(HOWTO_STORAGE_KEY, e.target.checked ? '1' : '0');
+            });
+        }
+        if (els.howtoOverlay) {
+            els.howtoOverlay.addEventListener('click', (e) => {
+                if (e.target === els.howtoOverlay) hideHowtoDialog();
+            });
+        }
+        showHowtoIfNeeded();
 
         // --- Exporters ---
         const getSvgPathString = (pts, closed) => {

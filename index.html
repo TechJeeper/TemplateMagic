@@ -46,10 +46,43 @@
         <p class="text-lg font-medium text-slate-200">Processing Image...</p>
     </div>
 
+    <!-- How To Use Dialog -->
+    <div id="howto-overlay" class="fixed inset-0 bg-slate-950/80 z-40 hidden items-center justify-center p-4">
+        <div class="w-full max-w-2xl bg-slate-900 border border-slate-700 rounded-xl shadow-2xl p-6 md:p-7">
+            <div class="flex items-start justify-between gap-4">
+                <div>
+                    <h2 class="text-lg md:text-xl font-semibold text-slate-100">How to Use TemplateMagic</h2>
+                    <p class="text-sm text-slate-400 mt-1">Create clean UV/laser templates in a few quick steps.</p>
+                </div>
+                <button id="btn-howto-close" class="p-2 rounded-md text-slate-400 hover:text-white hover:bg-slate-800 transition-colors" aria-label="Close how to use dialog">
+                    <i data-lucide="x" class="w-4 h-4"></i>
+                </button>
+            </div>
+
+            <ol class="mt-4 space-y-2 text-sm text-slate-200 list-decimal pl-5">
+                <li>Upload your image using <span class="text-indigo-300 font-medium">Upload Image</span>.</li>
+                <li>Use <span class="text-indigo-300 font-medium">Auto Wand</span> for one-click outlines, or <span class="text-indigo-300 font-medium">Manual</span> for point-by-point tracing.</li>
+                <li>Adjust edge/noise settings to improve detection quality.</li>
+                <li>Add a custom fill texture (optional) under <span class="text-indigo-300 font-medium">Output Fill Settings</span>.</li>
+                <li>Export your finished template as <span class="text-emerald-300 font-medium">SVG</span> or <span class="text-emerald-300 font-medium">PNG</span>.</li>
+            </ol>
+
+            <div class="mt-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                <label class="inline-flex items-center gap-2 text-sm text-slate-300 select-none">
+                    <input id="inp-howto-never" type="checkbox" class="rounded border-slate-600 bg-slate-800 text-indigo-500 focus:ring-indigo-500">
+                    Never show again
+                </label>
+                <button id="btn-howto-gotit" class="bg-indigo-500 hover:bg-indigo-400 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">
+                    Got it
+                </button>
+            </div>
+        </div>
+    </div>
+
     <!-- Header -->
     <header class="flex items-center justify-between px-6 py-4 bg-slate-800 border-b border-slate-700 shadow-md z-10 shrink-0">
         <div class="flex items-center gap-3">
-            <img src="./assets/logo.svg" alt="TemplateMagic logo" class="w-10 h-10 rounded-lg object-contain bg-indigo-500/10 p-1.5" />
+            <img src="./assets/logo.svg" alt="TemplateMagic logo" class="w-20 h-20 rounded-lg object-contain bg-indigo-500/10 p-1.5" />
             <div>
                 <h1 class="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-indigo-400 to-cyan-400">
                     TemplateMagic
@@ -265,7 +298,7 @@
                     <a href="https://techjeeper.com" target="_blank" rel="noopener noreferrer" class="text-indigo-400 hover:text-indigo-300 hover:underline transition-colors font-medium">TechJeeper Designs</a>
                 </p>
                 <a href="https://github.com/TechJeeper/TemplateMagic" target="_blank" rel="noopener noreferrer" class="text-[10px] text-slate-400 hover:text-slate-200 hover:underline transition-colors">
-                    View on GitHub
+                    Report Issues and View Project on GitHub
                 </a>
             </div>
         </div>
