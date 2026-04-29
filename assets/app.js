@@ -42,6 +42,7 @@
         const els = {
             loadingOverlay: document.getElementById('loading-overlay'),
             howtoOverlay: document.getElementById('howto-overlay'),
+            btnHowtoOpen: document.getElementById('btn-howto-open'),
             btnHowtoClose: document.getElementById('btn-howto-close'),
             btnHowtoGotit: document.getElementById('btn-howto-gotit'),
             inpHowtoNever: document.getElementById('inp-howto-never'),
@@ -98,13 +99,18 @@
             mainCanvas: document.getElementById('main-canvas'),
         };
 
+        const openHowtoDialog = () => {
+            if (!els.howtoOverlay) return;
+            els.howtoOverlay.classList.remove('hidden');
+            els.howtoOverlay.classList.add('flex');
+            lucide.createIcons();
+        };
+
         const showHowtoIfNeeded = () => {
             if (!els.howtoOverlay) return;
             const hideHowto = localStorage.getItem(HOWTO_STORAGE_KEY) === '1';
             if (!hideHowto) {
-                els.howtoOverlay.classList.remove('hidden');
-                els.howtoOverlay.classList.add('flex');
-                lucide.createIcons();
+                openHowtoDialog();
             }
         };
 
@@ -965,6 +971,7 @@ self.onmessage = function(e) {
             if (e.key === 'Escape') { state.points = []; updateUI(); }
         });
 
+        if (els.btnHowtoOpen) els.btnHowtoOpen.addEventListener('click', openHowtoDialog);
         if (els.btnHowtoClose) els.btnHowtoClose.addEventListener('click', hideHowtoDialog);
         if (els.btnHowtoGotit) els.btnHowtoGotit.addEventListener('click', hideHowtoDialog);
         if (els.inpHowtoNever) {
