@@ -1005,6 +1005,23 @@ self.onmessage = function(e) {
         showHowtoIfNeeded();
 
         // --- Exporters ---
+        const getPathBoundingBox = (paths, sx, sy) => {
+            if (!paths || paths.length === 0) return { minX: 0, minY: 0, maxX: 0, maxY: 0 };
+            let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+            for (const path of paths) {
+                for (const pt of path) {
+                    const x = pt.x * sx;
+                    const y = pt.y * sy;
+                    if (x < minX) minX = x;
+                    if (y < minY) minY = y;
+                    if (x > maxX) maxX = x;
+                    if (y > maxY) maxY = y;
+                }
+            }
+            if (minX === Infinity) return { minX: 0, minY: 0, maxX: 0, maxY: 0 };
+            return { minX, minY, maxX, maxY };
+        };
+
         const formatSvgNumber = (value, precision = 2) => Number.isFinite(value) ? Number(value.toFixed(precision)).toString() : '0';
 
         const getSvgPathString = (pts, closed, precision = 2) => {
@@ -1069,12 +1086,14 @@ self.onmessage = function(e) {
 
         els.btnExportSvg.addEventListener('click', () => {
             if (state.paths.length === 0) return;
-            const outputW = state.originalWidth || state.imageObj.width;
-            const outputH = state.originalHeight || state.imageObj.height;
             const sx = state.traceScaleX || 1;
             const sy = state.traceScaleY || 1;
 
-            const scalePts = (pts, stride = 1) => thinSvgPoints(pts, stride).map(pt => ({ x: pt.x * sx, y: pt.y * sy }));
+            const bbox = getPathBoundingBox(state.paths, sx, sy);
+            const trimmedW = Math.max(1, bbox.maxX - bbox.minX);
+            const trimmedH = Math.max(1, bbox.maxY - bbox.minY);
+
+            const scalePts = (pts, stride = 1) => thinSvgPoints(pts, stride).map(pt => ({ x: pt.x * sx - bbox.minX, y: pt.y * sy - bbox.minY }));
             const makeSvgPath = (precision = 2, stride = 1) => state.paths.map(p => getSvgPathString(scalePts(p, stride), true, precision)).join(' ');
             const fullSvgPath = makeSvgPath();
 
@@ -1083,15 +1102,15 @@ self.onmessage = function(e) {
                 if (textureDataUrl) {
                     if (state.fillMode === 'pattern') {
                         const pWidth = state.fillImageObj.width * state.fillScale * sx, pHeight = state.fillImageObj.height * state.fillScale * sy;
-                        svgContent = `<defs><pattern id="fill-pattern" patternUnits="userSpaceOnUse" width="${formatSvgNumber(pWidth)}" height="${formatSvgNumber(pHeight)}" patternTransform="translate(${formatSvgNumber(state.fillOffsetX * sx)}, ${formatSvgNumber(state.fillOffsetY * sy)})"><image href="${textureDataUrl}" x="0" y="0" width="${formatSvgNumber(pWidth)}" height="${formatSvgNumber(pHeight)}" /></pattern></defs><path d="${svgPath}" fill="url(#fill-pattern)" fill-rule="evenodd" stroke="none" />`;
+                        svgContent = `<defs><pattern id="fill-pattern" patternUnits="userSpaceOnUse" width="${formatSvgNumber(pWidth)}" height="${formatSvgNumber(pHeight)}" patternTransform="translate(${formatSvgNumber(state.fillOffsetX * sx - bbox.minX)}, ${formatSvgNumber(state.fillOffsetY * sy - bbox.minY)})"><image href="${textureDataUrl}" x="0" y="0" width="${formatSvgNumber(pWidth)}" height="${formatSvgNumber(pHeight)}" /></pattern></defs><path d="${svgPath}" fill="url(#fill-pattern)" fill-rule="evenodd" stroke="none" />`;
                     } else {
                         const imgWidth = state.fillImageObj.width * state.fillScale * sx, imgHeight = state.fillImageObj.height * state.fillScale * sy;
-                        svgContent = `<defs><clipPath id="shape-clip"><path d="${svgPath}" clip-rule="evenodd" /></clipPath></defs><image href="${textureDataUrl}" x="${formatSvgNumber(state.fillOffsetX * sx)}" y="${formatSvgNumber(state.fillOffsetY * sy)}" width="${formatSvgNumber(imgWidth)}" height="${formatSvgNumber(imgHeight)}" clip-path="url(#shape-clip)" />`;
+                        svgContent = `<defs><clipPath id="shape-clip"><path d="${svgPath}" clip-rule="evenodd" /></clipPath></defs><image href="${textureDataUrl}" x="${formatSvgNumber(state.fillOffsetX * sx - bbox.minX)}" y="${formatSvgNumber(state.fillOffsetY * sy - bbox.minY)}" width="${formatSvgNumber(imgWidth)}" height="${formatSvgNumber(imgHeight)}" clip-path="url(#shape-clip)" />`;
                     }
                 } else {
                     svgContent = `  <path d="${svgPath}" fill="black" fill-rule="evenodd" stroke="none" />`;
                 }
-                return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${formatSvgNumber(outputW)} ${formatSvgNumber(outputH)}" width="${formatSvgNumber(outputW)}" height="${formatSvgNumber(outputH)}"><rect width="100%" height="100%" fill="white" />${svgContent}</svg>`;
+                return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${formatSvgNumber(trimmedW)} ${formatSvgNumber(trimmedH)}" width="${formatSvgNumber(trimmedW)}" height="${formatSvgNumber(trimmedH)}">${svgContent}</svg>`;
             };
 
             let blob = svgBlobFromString(buildSvg());
@@ -1137,16 +1156,19 @@ self.onmessage = function(e) {
 
         els.btnExportPng.addEventListener('click', () => {
             if (state.paths.length === 0) return;
-            const outputW = state.originalWidth || state.imageObj.width;
-            const outputH = state.originalHeight || state.imageObj.height;
             const sx = state.traceScaleX || 1;
             const sy = state.traceScaleY || 1;
-            const pngScale = getPngExportScale(outputW, outputH);
-            const exportW = Math.max(1, Math.round(outputW * pngScale));
-            const exportH = Math.max(1, Math.round(outputH * pngScale));
-            const ex = exportW / outputW;
-            const ey = exportH / outputH;
-            const scalePts = (pts) => pts.map(pt => ({ x: pt.x * sx * ex, y: pt.y * sy * ey }));
+
+            const bbox = getPathBoundingBox(state.paths, sx, sy);
+            const trimmedW = Math.max(1, bbox.maxX - bbox.minX);
+            const trimmedH = Math.max(1, bbox.maxY - bbox.minY);
+
+            const pngScale = getPngExportScale(trimmedW, trimmedH);
+            const exportW = Math.max(1, Math.round(trimmedW * pngScale));
+            const exportH = Math.max(1, Math.round(trimmedH * pngScale));
+            const ex = exportW / trimmedW;
+            const ey = exportH / trimmedH;
+            const scalePts = (pts) => pts.map(pt => ({ x: (pt.x * sx - bbox.minX) * ex, y: (pt.y * sy - bbox.minY) * ey }));
 
             const expCanvas = document.createElement('canvas');
             expCanvas.width = exportW; 
@@ -1166,7 +1188,7 @@ self.onmessage = function(e) {
                     enableHighQualitySmoothing(pCtx);
                     pCtx.drawImage(state.fillImageObj, 0, 0, pCanvas.width, pCanvas.height);
                     const pattern = eCtx.createPattern(pCanvas, 'repeat');
-                    pattern.setTransform(new DOMMatrix().translate(state.fillOffsetX * sx * ex, state.fillOffsetY * sy * ey));
+                    pattern.setTransform(new DOMMatrix().translate((state.fillOffsetX * sx - bbox.minX) * ex, (state.fillOffsetY * sy - bbox.minY) * ey));
                     eCtx.fillStyle = pattern; 
                     eCtx.fill('evenodd');
                 } else {
@@ -1174,8 +1196,8 @@ self.onmessage = function(e) {
                     eCtx.clip('evenodd');
                     eCtx.drawImage(
                         state.fillImageObj,
-                        state.fillOffsetX * sx * ex,
-                        state.fillOffsetY * sy * ey,
+                        (state.fillOffsetX * sx - bbox.minX) * ex,
+                        (state.fillOffsetY * sy - bbox.minY) * ey,
                         Math.max(1, Math.round(state.fillImageObj.width * state.fillScale * sx * ex)),
                         Math.max(1, Math.round(state.fillImageObj.height * state.fillScale * sy * ey))
                     );
