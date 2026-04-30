@@ -2,6 +2,7 @@
         lucide.createIcons();
         const HOWTO_STORAGE_KEY = 'templatemagic_hide_howto_dialog';
         const MAX_SVG_EXPORT_BYTES = 5 * 1024 * 1024;
+        const SVG_TEXTURE_MIN_DIMENSION = 16;
         const PNG_EXPORT_SCALE = 3;
         const MAX_PNG_EXPORT_DIMENSION = 8192;
         const MAX_PNG_EXPORT_PIXELS = 32000000;
@@ -1005,32 +1006,66 @@ self.onmessage = function(e) {
         showHowtoIfNeeded();
 
         // --- Exporters ---
-        const getSvgPathString = (pts, closed) => {
+        const formatSvgNumber = (value, precision = 2) => Number.isFinite(value) ? Number(value.toFixed(precision)).toString() : '0';
+
+        const getSvgPathString = (pts, closed, precision = 2) => {
             if (!pts || pts.length < 3) return '';
             let svgPath = '';
             if (state.smoothCurves && pts.length > 2) {
                 if (closed) {
                     const startX = (pts[pts.length - 1].x + pts[0].x) / 2, startY = (pts[pts.length - 1].y + pts[0].y) / 2;
-                    svgPath += `M ${startX} ${startY} `;
+                    svgPath += `M ${formatSvgNumber(startX, precision)} ${formatSvgNumber(startY, precision)} `;
                     for (let i = 0; i < pts.length; i++) {
                         const nextIdx = (i + 1) % pts.length;
                         const xc = (pts[i].x + pts[nextIdx].x) / 2, yc = (pts[i].y + pts[nextIdx].y) / 2;
-                        svgPath += `Q ${pts[i].x} ${pts[i].y}, ${xc} ${yc} `;
+                        svgPath += `Q ${formatSvgNumber(pts[i].x, precision)} ${formatSvgNumber(pts[i].y, precision)}, ${formatSvgNumber(xc, precision)} ${formatSvgNumber(yc, precision)} `;
                     }
                 } else {
-                    svgPath += `M ${pts[0].x} ${pts[0].y} `;
+                    svgPath += `M ${formatSvgNumber(pts[0].x, precision)} ${formatSvgNumber(pts[0].y, precision)} `;
                     for (let i = 1; i < pts.length - 1; i++) {
                         const xc = (pts[i].x + pts[i + 1].x) / 2, yc = (pts[i].y + pts[i + 1].y) / 2;
-                        svgPath += `Q ${pts[i].x} ${pts[i].y}, ${xc} ${yc} `;
+                        svgPath += `Q ${formatSvgNumber(pts[i].x, precision)} ${formatSvgNumber(pts[i].y, precision)}, ${formatSvgNumber(xc, precision)} ${formatSvgNumber(yc, precision)} `;
                     }
-                    svgPath += `L ${pts[pts.length - 1].x} ${pts[pts.length - 1].y} `;
+                    svgPath += `L ${formatSvgNumber(pts[pts.length - 1].x, precision)} ${formatSvgNumber(pts[pts.length - 1].y, precision)} `;
                 }
             } else {
-                svgPath = `M ${pts[0].x} ${pts[0].y} `;
-                for (let i = 1; i < pts.length; i++) svgPath += `L ${pts[i].x} ${pts[i].y} `;
+                svgPath = `M ${formatSvgNumber(pts[0].x, precision)} ${formatSvgNumber(pts[0].y, precision)} `;
+                for (let i = 1; i < pts.length; i++) svgPath += `L ${formatSvgNumber(pts[i].x, precision)} ${formatSvgNumber(pts[i].y, precision)} `;
             }
             if (closed) svgPath += 'Z';
             return svgPath;
+        };
+
+        const thinSvgPoints = (pts, stride) => {
+            if (stride <= 1 || pts.length <= 3) return pts;
+            const thinned = pts.filter((_, idx) => idx % stride === 0);
+            return thinned.length >= 3 ? thinned : pts.slice(0, 3);
+        };
+
+        const svgBlobFromString = (svgStr) => new Blob([svgStr], { type: 'image/svg+xml;charset=utf-8' });
+
+        const makeCompressedTextureDataUrl = (img, scale, quality) => {
+            const canvas = document.createElement('canvas');
+            canvas.width = Math.max(SVG_TEXTURE_MIN_DIMENSION, Math.round(img.width * scale));
+            canvas.height = Math.max(SVG_TEXTURE_MIN_DIMENSION, Math.round(img.height * scale));
+            const textureCtx = canvas.getContext('2d');
+            enableHighQualitySmoothing(textureCtx);
+            textureCtx.fillStyle = 'white';
+            textureCtx.fillRect(0, 0, canvas.width, canvas.height);
+            textureCtx.drawImage(img, 0, 0, canvas.width, canvas.height);
+            return canvas.toDataURL('image/jpeg', quality);
+        };
+
+        const downloadBlob = (blob, filename) => {
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.style.display = 'none';
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            setTimeout(() => URL.revokeObjectURL(url), 100);
         };
 
         els.btnExportSvg.addEventListener('click', () => {
@@ -1040,38 +1075,65 @@ self.onmessage = function(e) {
             const sx = state.traceScaleX || 1;
             const sy = state.traceScaleY || 1;
 
-            const scalePts = (pts) => pts.map(pt => ({ x: pt.x * sx, y: pt.y * sy }));
-            const fullSvgPath = state.paths.map(p => getSvgPathString(scalePts(p), true)).join(' ');
-            let svgContent = '';
-            if (state.fillImageDataUrl) {
-                if (state.fillMode === 'pattern') {
-                    const pWidth = state.fillImageObj.width * state.fillScale * sx, pHeight = state.fillImageObj.height * state.fillScale * sy;
-                    svgContent = `<defs><pattern id="fill-pattern" patternUnits="userSpaceOnUse" width="${pWidth}" height="${pHeight}" patternTransform="translate(${state.fillOffsetX * sx}, ${state.fillOffsetY * sy})"><image href="${state.fillImageDataUrl}" x="0" y="0" width="${pWidth}" height="${pHeight}" /></pattern></defs><path d="${fullSvgPath}" fill="url(#fill-pattern)" fill-rule="evenodd" stroke="none" />`;
+            const scalePts = (pts, stride = 1) => thinSvgPoints(pts, stride).map(pt => ({ x: pt.x * sx, y: pt.y * sy }));
+            const makeSvgPath = (precision = 2, stride = 1) => state.paths.map(p => getSvgPathString(scalePts(p, stride), true, precision)).join(' ');
+            const fullSvgPath = makeSvgPath();
+
+            const buildSvg = (textureDataUrl = state.fillImageDataUrl, svgPath = fullSvgPath) => {
+                let svgContent = '';
+                if (textureDataUrl) {
+                    if (state.fillMode === 'pattern') {
+                        const pWidth = state.fillImageObj.width * state.fillScale * sx, pHeight = state.fillImageObj.height * state.fillScale * sy;
+                        svgContent = `<defs><pattern id="fill-pattern" patternUnits="userSpaceOnUse" width="${formatSvgNumber(pWidth)}" height="${formatSvgNumber(pHeight)}" patternTransform="translate(${formatSvgNumber(state.fillOffsetX * sx)}, ${formatSvgNumber(state.fillOffsetY * sy)})"><image href="${textureDataUrl}" x="0" y="0" width="${formatSvgNumber(pWidth)}" height="${formatSvgNumber(pHeight)}" /></pattern></defs><path d="${svgPath}" fill="url(#fill-pattern)" fill-rule="evenodd" stroke="none" />`;
+                    } else {
+                        const imgWidth = state.fillImageObj.width * state.fillScale * sx, imgHeight = state.fillImageObj.height * state.fillScale * sy;
+                        svgContent = `<defs><clipPath id="shape-clip"><path d="${svgPath}" clip-rule="evenodd" /></clipPath></defs><image href="${textureDataUrl}" x="${formatSvgNumber(state.fillOffsetX * sx)}" y="${formatSvgNumber(state.fillOffsetY * sy)}" width="${formatSvgNumber(imgWidth)}" height="${formatSvgNumber(imgHeight)}" clip-path="url(#shape-clip)" />`;
+                    }
                 } else {
-                    const imgWidth = state.fillImageObj.width * state.fillScale * sx, imgHeight = state.fillImageObj.height * state.fillScale * sy;
-                    svgContent = `<defs><clipPath id="shape-clip"><path d="${fullSvgPath}" clip-rule="evenodd" /></clipPath></defs><image href="${state.fillImageDataUrl}" x="${state.fillOffsetX * sx}" y="${state.fillOffsetY * sy}" width="${imgWidth}" height="${imgHeight}" clip-path="url(#shape-clip)" />`;
+                    svgContent = `  <path d="${svgPath}" fill="black" fill-rule="evenodd" stroke="none" />`;
                 }
-            } else {
-                svgContent = `  <path d="${fullSvgPath}" fill="black" fill-rule="evenodd" stroke="none" />`;
+                return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${formatSvgNumber(outputW)} ${formatSvgNumber(outputH)}" width="${formatSvgNumber(outputW)}" height="${formatSvgNumber(outputH)}"><rect width="100%" height="100%" fill="white" />${svgContent}</svg>`;
+            };
+
+            let blob = svgBlobFromString(buildSvg());
+            let bestTextureDataUrl = state.fillImageDataUrl;
+            if (blob.size > MAX_SVG_EXPORT_BYTES && state.fillImageObj) {
+                const compressionSteps = [
+                    { scale: 0.9, quality: 0.82 },
+                    { scale: 0.75, quality: 0.76 },
+                    { scale: 0.6, quality: 0.7 },
+                    { scale: 0.45, quality: 0.62 },
+                    { scale: 0.32, quality: 0.55 },
+                    { scale: 0.22, quality: 0.48 },
+                    { scale: 0.15, quality: 0.42 },
+                    { scale: 0.1, quality: 0.36 },
+                    { scale: 0.06, quality: 0.3 }
+                ];
+
+                for (const step of compressionSteps) {
+                    const compressedTexture = makeCompressedTextureDataUrl(state.fillImageObj, step.scale, step.quality);
+                    const compressedBlob = svgBlobFromString(buildSvg(compressedTexture));
+                    bestTextureDataUrl = compressedTexture;
+                    blob = compressedBlob;
+                    if (blob.size <= MAX_SVG_EXPORT_BYTES) break;
+                }
             }
 
-            const svgStr = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${outputW} ${outputH}" width="${outputW}" height="${outputH}"><rect width="100%" height="100%" fill="white" />${svgContent}</svg>`;
-            const blob = new Blob([svgStr], { type: 'image/svg+xml;charset=utf-8' });
             if (blob.size > MAX_SVG_EXPORT_BYTES) {
-                alert('SVG export is larger than the 5MB limit. Try removing or reducing the custom texture before exporting.');
-                return;
+                const maxPathPoints = state.paths.reduce((max, pts) => Math.max(max, pts.length), 0);
+                const pathSteps = [{ precision: 1, stride: 1 }, { precision: 0, stride: 1 }];
+                for (let stride = 2; stride <= Math.max(2, maxPathPoints); stride *= 2) {
+                    pathSteps.push({ precision: 0, stride });
+                }
+
+                for (const { precision, stride } of pathSteps) {
+                    const compactPath = makeSvgPath(precision, stride);
+                    blob = svgBlobFromString(buildSvg(bestTextureDataUrl, compactPath));
+                    if (blob.size <= MAX_SVG_EXPORT_BYTES) break;
+                }
             }
-            const url = URL.createObjectURL(blob);
-            
-            const a = document.createElement('a');
-            a.style.display = 'none';
-            a.href = url;
-            a.download = 'uv_laser_template.svg';
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            
-            setTimeout(() => URL.revokeObjectURL(url), 100);
+
+            downloadBlob(blob, 'uv_laser_template.svg');
         });
 
         els.btnExportPng.addEventListener('click', () => {
@@ -1130,17 +1192,7 @@ self.onmessage = function(e) {
                     alert('Failed to generate PNG.');
                     return;
                 }
-                const url = URL.createObjectURL(blob);
-                
-                const a = document.createElement('a'); 
-                a.style.display = 'none';
-                a.href = url; 
-                a.download = 'uv_laser_template.png'; 
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
-                
-                setTimeout(() => URL.revokeObjectURL(url), 100);
+                downloadBlob(blob, 'uv_laser_template.png');
             }, 'image/png');
         });
 
