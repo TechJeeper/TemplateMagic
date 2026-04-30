@@ -3,9 +3,8 @@
         const HOWTO_STORAGE_KEY = 'templatemagic_hide_howto_dialog';
         const MAX_SVG_EXPORT_BYTES = 5 * 1024 * 1024;
         const SVG_TEXTURE_MIN_DIMENSION = 16;
-        const PNG_EXPORT_SCALE = 3;
-        const MAX_PNG_EXPORT_DIMENSION = 8192;
-        const MAX_PNG_EXPORT_PIXELS = 32000000;
+        const MAX_PNG_EXPORT_DIMENSION = 12800;
+        const MAX_PNG_EXPORT_PIXELS = MAX_PNG_EXPORT_DIMENSION * MAX_PNG_EXPORT_DIMENSION;
 
         // --- State Management ---
         const state = {
@@ -599,7 +598,7 @@ self.onmessage = function(e) {
 
             const dimensionScale = MAX_PNG_EXPORT_DIMENSION / Math.max(width, height);
             const pixelScale = Math.sqrt(MAX_PNG_EXPORT_PIXELS / (width * height));
-            return Math.max(1, Math.min(PNG_EXPORT_SCALE, dimensionScale, pixelScale));
+            return Math.max(0.01, Math.min(dimensionScale, pixelScale));
         };
 
         const enableHighQualitySmoothing = (targetCtx) => {
