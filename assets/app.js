@@ -1,6 +1,10 @@
         // Initialize Icons
         lucide.createIcons();
         const HOWTO_STORAGE_KEY = 'templatemagic_hide_howto_dialog';
+        const MAX_SVG_EXPORT_BYTES = 5 * 1024 * 1024;
+        const PNG_EXPORT_SCALE = 3;
+        const MAX_PNG_EXPORT_DIMENSION = 8192;
+        const MAX_PNG_EXPORT_PIXELS = 32000000;
 
         // --- State Management ---
         const state = {
@@ -589,6 +593,19 @@ self.onmessage = function(e) {
             if (closed) targetCtx.closePath();
         };
 
+        const getPngExportScale = (width, height) => {
+            if (width <= 0 || height <= 0) return 1;
+
+            const dimensionScale = MAX_PNG_EXPORT_DIMENSION / Math.max(width, height);
+            const pixelScale = Math.sqrt(MAX_PNG_EXPORT_PIXELS / (width * height));
+            return Math.max(1, Math.min(PNG_EXPORT_SCALE, dimensionScale, pixelScale));
+        };
+
+        const enableHighQualitySmoothing = (targetCtx) => {
+            targetCtx.imageSmoothingEnabled = true;
+            targetCtx.imageSmoothingQuality = 'high';
+        };
+
         const renderCanvas = () => {
             if (!state.imageObj) return;
             
@@ -1040,6 +1057,10 @@ self.onmessage = function(e) {
 
             const svgStr = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${outputW} ${outputH}" width="${outputW}" height="${outputH}"><rect width="100%" height="100%" fill="white" />${svgContent}</svg>`;
             const blob = new Blob([svgStr], { type: 'image/svg+xml;charset=utf-8' });
+            if (blob.size > MAX_SVG_EXPORT_BYTES) {
+                alert('SVG export is larger than the 5MB limit. Try removing or reducing the custom texture before exporting.');
+                return;
+            }
             const url = URL.createObjectURL(blob);
             
             const a = document.createElement('a');
@@ -1059,12 +1080,18 @@ self.onmessage = function(e) {
             const outputH = state.originalHeight || state.imageObj.height;
             const sx = state.traceScaleX || 1;
             const sy = state.traceScaleY || 1;
-            const scalePts = (pts) => pts.map(pt => ({ x: pt.x * sx, y: pt.y * sy }));
+            const pngScale = getPngExportScale(outputW, outputH);
+            const exportW = Math.max(1, Math.round(outputW * pngScale));
+            const exportH = Math.max(1, Math.round(outputH * pngScale));
+            const ex = exportW / outputW;
+            const ey = exportH / outputH;
+            const scalePts = (pts) => pts.map(pt => ({ x: pt.x * sx * ex, y: pt.y * sy * ey }));
 
             const expCanvas = document.createElement('canvas');
-            expCanvas.width = outputW; 
-            expCanvas.height = outputH;
+            expCanvas.width = exportW; 
+            expCanvas.height = exportH;
             const eCtx = expCanvas.getContext('2d');
+            enableHighQualitySmoothing(eCtx);
             
             eCtx.beginPath();
             state.paths.forEach(p => buildPath(eCtx, scalePts(p), true, state.smoothCurves));
@@ -1072,11 +1099,13 @@ self.onmessage = function(e) {
             if (state.fillImageObj) {
                 if (state.fillMode === 'pattern') {
                     const pCanvas = document.createElement('canvas');
-                    pCanvas.width = Math.max(1, state.fillImageObj.width * state.fillScale * sx); 
-                    pCanvas.height = Math.max(1, state.fillImageObj.height * state.fillScale * sy);
-                    pCanvas.getContext('2d').drawImage(state.fillImageObj, 0, 0, pCanvas.width, pCanvas.height);
+                    pCanvas.width = Math.max(1, Math.round(state.fillImageObj.width * state.fillScale * sx * ex)); 
+                    pCanvas.height = Math.max(1, Math.round(state.fillImageObj.height * state.fillScale * sy * ey));
+                    const pCtx = pCanvas.getContext('2d');
+                    enableHighQualitySmoothing(pCtx);
+                    pCtx.drawImage(state.fillImageObj, 0, 0, pCanvas.width, pCanvas.height);
                     const pattern = eCtx.createPattern(pCanvas, 'repeat');
-                    pattern.setTransform(new DOMMatrix().translate(state.fillOffsetX * sx, state.fillOffsetY * sy));
+                    pattern.setTransform(new DOMMatrix().translate(state.fillOffsetX * sx * ex, state.fillOffsetY * sy * ey));
                     eCtx.fillStyle = pattern; 
                     eCtx.fill('evenodd');
                 } else {
@@ -1084,10 +1113,10 @@ self.onmessage = function(e) {
                     eCtx.clip('evenodd');
                     eCtx.drawImage(
                         state.fillImageObj,
-                        state.fillOffsetX * sx,
-                        state.fillOffsetY * sy,
-                        Math.max(1, state.fillImageObj.width * state.fillScale * sx),
-                        Math.max(1, state.fillImageObj.height * state.fillScale * sy)
+                        state.fillOffsetX * sx * ex,
+                        state.fillOffsetY * sy * ey,
+                        Math.max(1, Math.round(state.fillImageObj.width * state.fillScale * sx * ex)),
+                        Math.max(1, Math.round(state.fillImageObj.height * state.fillScale * sy * ey))
                     );
                     eCtx.restore();
                 }
