@@ -11,6 +11,8 @@
             imageObj: null,
             originalWidth: 0,
             originalHeight: 0,
+            panX: 0,
+            panY: 0,
             // Scale factors mapping traced/display image coords -> original upload coords
             traceScaleX: 1,
             traceScaleY: 1,
@@ -614,7 +616,7 @@ self.onmessage = function(e) {
             els.mainCanvas.height = state.imageObj.height;
             els.canvasWrapper.style.width = state.imageObj.width + 'px';
             els.canvasWrapper.style.height = state.imageObj.height + 'px';
-            els.canvasWrapper.style.transform = `scale(${state.zoom})`;
+            els.canvasWrapper.style.transform = `translate(${state.panX}px, ${state.panY}px) scale(${state.zoom})`;
 
             // Draw Base Image
             ctx.clearRect(0, 0, els.mainCanvas.width, els.mainCanvas.height);
@@ -754,7 +756,7 @@ self.onmessage = function(e) {
                     state.traceScaleX = norm.scaleX;
                     state.traceScaleY = norm.scaleY;
                     state.imageObj = norm.image;
-                    state.paths = []; state.points = []; state.zoom = 1; els.valZoom.innerText = '100%';
+                    state.paths = []; state.points = []; state.zoom = 1; state.panX = 0; state.panY = 0; els.valZoom.innerText = '100%';
                     if (state.imageObj !== img) {
                         const originalPixels = img.width * img.height;
                         const scaledPixels = state.imageObj.width * state.imageObj.height;
@@ -870,6 +872,114 @@ self.onmessage = function(e) {
 
         // Canvas Pointer Events (supports mouse + touch + pen)
         let activePointerId = null;
+        const activePointers = new Map();
+        let initialPinchDistance = null;
+        let initialPinchZoom = null;
+        let initialPinchPan = null;
+        let initialPinchMidpoint = null;
+        let isPinching = false;
+        let wandTimeoutId = null;
+
+        let touchAddedPoint = false;
+        els.canvasContainer.addEventListener('pointerdown', (e) => {
+            if (!state.imageObj) return;
+            activePointers.set(e.pointerId, e);
+            if (activePointers.size >= 2) {
+                isPinching = true;
+                const pts = Array.from(activePointers.values());
+                const dx = pts[0].clientX - pts[1].clientX;
+                const dy = pts[0].clientY - pts[1].clientY;
+                initialPinchDistance = Math.hypot(dx, dy);
+                initialPinchZoom = state.zoom;
+                initialPinchPan = { x: state.panX, y: state.panY };
+                initialPinchMidpoint = {
+                    x: (pts[0].clientX + pts[1].clientX) / 2,
+                    y: (pts[0].clientY + pts[1].clientY) / 2
+                };
+
+                // Cancel ongoing tools if 2 fingers are down
+                if (state.toolMode === 'wand' && wandTimeoutId) {
+                    clearTimeout(wandTimeoutId);
+                    wandTimeoutId = null;
+                    setLoading(false);
+                } else if (state.toolMode === 'trace' && state.points.length > 0 && touchAddedPoint) {
+                    state.points.pop();
+                    touchAddedPoint = false;
+                    state.isDragging = false;
+                    updateUI();
+                }
+            }
+        }, { capture: true });
+
+        els.canvasContainer.addEventListener('pointermove', (e) => {
+            if (!state.imageObj) return;
+            if (activePointers.has(e.pointerId)) {
+                activePointers.set(e.pointerId, e);
+            }
+            if (isPinching && activePointers.size >= 2) {
+                e.preventDefault?.();
+                const pts = Array.from(activePointers.values());
+                const dx = pts[0].clientX - pts[1].clientX;
+                const dy = pts[0].clientY - pts[1].clientY;
+                const currentDistance = Math.hypot(dx, dy);
+
+                if (initialPinchDistance > 0) {
+                    const zoomRatio = currentDistance / initialPinchDistance;
+                    let newZoom = initialPinchZoom * zoomRatio;
+                    // Limit zoom
+                    newZoom = Math.max(0.1, Math.min(5, newZoom));
+
+                    const currentMidpointX = (pts[0].clientX + pts[1].clientX) / 2;
+                    const currentMidpointY = (pts[0].clientY + pts[1].clientY) / 2;
+
+                    // Pan
+                    const deltaX = currentMidpointX - initialPinchMidpoint.x;
+                    const deltaY = currentMidpointY - initialPinchMidpoint.y;
+
+                    // To zoom into the pinch point, we need to adjust the pan based on the new zoom
+                    // The point under initialPinchMidpoint should remain at currentMidpoint
+                    // We calculate the pinch center relative to the wrapper's un-scaled, un-panned center
+                    const rect = els.canvasContainer.getBoundingClientRect();
+                    const centerX = rect.left + rect.width / 2;
+                    const centerY = rect.top + rect.height / 2;
+
+                    // Offset of initial pinch from center
+                    const offsetX = initialPinchMidpoint.x - (centerX + initialPinchPan.x);
+                    const offsetY = initialPinchMidpoint.y - (centerY + initialPinchPan.y);
+
+                    // We want to pan so that this point stays relative to our fingers
+                    // But an easier approach using CSS transform is to just apply the delta to panX/Y
+                    // and adjust pan for zoom change:
+
+                    // delta zoom:
+                    const scaleChange = newZoom - initialPinchZoom;
+
+                    // We adjust pan to zoom towards the midpoint
+                    state.panX = initialPinchPan.x + deltaX - (offsetX * scaleChange / initialPinchZoom);
+                    state.panY = initialPinchPan.y + deltaY - (offsetY * scaleChange / initialPinchZoom);
+                    state.zoom = newZoom;
+
+                    els.valZoom.innerText = Math.round(state.zoom * 100) + '%';
+
+                    renderCanvas();
+                }
+            }
+        });
+
+        const handleContainerPointerUp = (e) => {
+            activePointers.delete(e.pointerId);
+            if (activePointers.size < 2) {
+                isPinching = false;
+                initialPinchDistance = null;
+            }
+            if (activePointers.size === 0) {
+                touchAddedPoint = false;
+            }
+        };
+
+        els.canvasContainer.addEventListener('pointerup', handleContainerPointerUp);
+        els.canvasContainer.addEventListener('pointercancel', handleContainerPointerUp);
+        els.canvasContainer.addEventListener('pointerleave', handleContainerPointerUp);
 
         els.mainCanvas.addEventListener('pointerdown', (e) => {
             if (!state.imageObj) return;
@@ -883,8 +993,9 @@ self.onmessage = function(e) {
             const coords = getCanvasCoords(e);
 
             if (state.toolMode === 'wand') {
+                if (isPinching) return;
                 setLoading(true);
-                setTimeout(() => {
+                wandTimeoutId = setTimeout(() => {
                     const tmpCanvas = document.createElement('canvas');
                     tmpCanvas.width = state.imageObj.width; tmpCanvas.height = state.imageObj.height;
                     const tmpCtx = tmpCanvas.getContext('2d');
@@ -923,10 +1034,12 @@ self.onmessage = function(e) {
                         state.paths.push(...simplifiedPaths);
                     }
                     setLoading(false);
+                    wandTimeoutId = null;
                     updateUI();
                 }, 50);
                 return;
             }
+            if (isPinching) return;
 
             const snapped = getSnappedCoords(coords.x, coords.y);
             if (state.points.length > 2) {
@@ -934,17 +1047,19 @@ self.onmessage = function(e) {
                     state.paths.push([...state.points]);
                     state.points = [];
                     state.isDragging = false;
+                    touchAddedPoint = false;
                     updateUI();
                     return;
                 }
             }
             state.points.push(snapped);
+            touchAddedPoint = true;
             state.isDragging = true;
             updateUI();
         });
 
         els.mainCanvas.addEventListener('pointermove', (e) => {
-            if (!state.imageObj || state.toolMode === 'wand') return;
+            if (!state.imageObj || state.toolMode === 'wand' || isPinching) return;
             if (activePointerId !== null && e.pointerId !== activePointerId) return;
 
             e.preventDefault?.();
